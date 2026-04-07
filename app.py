@@ -1,52 +1,35 @@
 import streamlit as st
 import pandas as pd
-import requests
-from streamlit_lottie import st_lottie
-
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
-# ---------------- LOTTIE FUNCTION ----------------
-def load_lottieurl(url):
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
-
-# ---------------- UI SETTINGS ----------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="AI Health Assistant", layout="wide")
 
-st.title("🤖 AI Health Assistant")
-lottie = load_lottieurl("https://assets2.lottiefiles.com/packages/lf20_tutvdkg0.json")
-st_lottie(lottie, height=300)
-
-st.markdown("Get instant disease prediction, medicines & hospitals")
+st.title("🤖 AI Health Assistant Pro")
+st.markdown("### Predict Disease • Find Medicines • Locate Hospitals")
 
 # ---------------- LOAD DATA ----------------
-symptoms = pd.read_csv("symptoms_disease.csv")
-medicine = pd.read_csv("medicine_data.csv")
-hospital = pd.read_csv("hospital_data.csv")
+@st.cache_data
+def load_data():
+    symptoms = pd.read_csv("symptoms_disease.csv")
+    medicine = pd.read_csv("medicine_data.csv")
+    hospital = pd.read_csv("hospital_data.csv")
+    return symptoms, medicine, hospital
+
+symptoms, medicine, hospital = load_data()
 
 # ---------------- ENCODING ----------------
-le_fever = LabelEncoder()
-le_cough = LabelEncoder()
-le_fatigue = LabelEncoder()
-le_breath = LabelEncoder()
-le_gender = LabelEncoder()
-le_bp = LabelEncoder()
-le_chol = LabelEncoder()
-le_outcome = LabelEncoder()
-le_disease = LabelEncoder()
+le = {}
+columns = ['Fever', 'Cough', 'Fatigue', 'Difficulty Breathing',
+           'Gender', 'Blood Pressure', 'Cholesterol Level', 'Outcome Variable']
 
-symptoms['Fever'] = le_fever.fit_transform(symptoms['Fever'])
-symptoms['Cough'] = le_cough.fit_transform(symptoms['Cough'])
-symptoms['Fatigue'] = le_fatigue.fit_transform(symptoms['Fatigue'])
-symptoms['Difficulty Breathing'] = le_breath.fit_transform(symptoms['Difficulty Breathing'])
-symptoms['Gender'] = le_gender.fit_transform(symptoms['Gender'])
-symptoms['Blood Pressure'] = le_bp.fit_transform(symptoms['Blood Pressure'])
-symptoms['Cholesterol Level'] = le_chol.fit_transform(symptoms['Cholesterol Level'])
-symptoms['Outcome Variable'] = le_outcome.fit_transform(symptoms['Outcome Variable'])
+for col in columns:
+    le[col] = LabelEncoder()
+    symptoms[col] = le[col].fit_transform(symptoms[col])
+
+le_disease = LabelEncoder()
 symptoms['Disease'] = le_disease.fit_transform(symptoms['Disease'])
 
 # ---------------- MODEL ----------------
@@ -58,14 +41,12 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 model = RandomForestClassifier()
 model.fit(X_train, y_train)
 
-# ---------------- SIDEBAR ----------------
-st.sidebar.title("Navigation")
-option = st.sidebar.radio("Go to", ["Predict Disease", "Medicines", "Hospitals"])
+# ---------------- TABS ----------------
+tab1, tab2, tab3 = st.tabs(["🧠 Prediction", "💊 Medicines", "🏥 Hospitals"])
 
-# ---------------- OPTION 1 ----------------
-if option == "Predict Disease":
-
-    st.header("🧠 Disease Prediction")
+# ================== TAB 1 ==================
+with tab1:
+    st.subheader("Enter Symptoms")
 
     col1, col2 = st.columns(2)
 
@@ -76,83 +57,82 @@ if option == "Predict Disease":
         breathing = st.selectbox("Difficulty Breathing", ["Yes", "No"])
 
     with col2:
-        age = st.number_input("Age", 1, 100)
+        age = st.slider("Age", 1, 100, 25)
         gender = st.selectbox("Gender", ["Male", "Female"])
         bp = st.selectbox("Blood Pressure", ["Low", "Normal", "High"])
-        chol = st.selectbox("Cholesterol Level", ["Normal", "High"])
-        outcome = st.selectbox("Outcome", ["Positive", "Negative"])
+        chol = st.selectbox("Cholesterol", ["Normal", "High"])
+        outcome = st.selectbox("Condition", ["Positive", "Negative"])
 
-    if st.button("🔍 Predict"):
+    if st.button("🔍 Predict Disease"):
+        try:
+            input_data = [
+                le['Fever'].transform([fever])[0],
+                le['Cough'].transform([cough])[0],
+                le['Fatigue'].transform([fatigue])[0],
+                le['Difficulty Breathing'].transform([breathing])[0],
+                age,
+                le['Gender'].transform([gender])[0],
+                le['Blood Pressure'].transform([bp])[0],
+                le['Cholesterol Level'].transform([chol])[0],
+                le['Outcome Variable'].transform([outcome])[0]
+            ]
 
-        input_data = [
-            le_fever.transform([fever])[0],
-            le_cough.transform([cough])[0],
-            le_fatigue.transform([fatigue])[0],
-            le_breath.transform([breathing])[0],
-            age,
-            le_gender.transform([gender])[0],
-            le_bp.transform([bp])[0],
-            le_chol.transform([chol])[0],
-            le_outcome.transform([outcome])[0]
-        ]
+            prediction = model.predict([input_data])
+            disease = le_disease.inverse_transform(prediction)[0]
 
-        prediction = model.predict([input_data])
-        disease = le_disease.inverse_transform(prediction)[0]
+            st.success(f"🧠 Predicted Disease: {disease}")
+            st.balloons()
 
-        # ✅ Stylish Output
-        st.markdown(f"## 🧠 Predicted Disease: **{disease}**")
-        st.balloons()
+            # Medicines auto show
+            st.subheader("💊 Recommended Medicines")
 
-        # ✅ Medicines Auto Show
-        st.subheader("💊 Recommended Medicines")
+            filtered = medicine[
+                medicine["name"].str.contains(disease, case=False, na=False)
+            ]
 
-        filtered = medicine[
-            medicine["name"].str.contains(disease, case=False, na=False)
-        ]
+            if len(filtered) > 0:
+                st.dataframe(filtered[["name", "price(₹)", "short_composition1"]].head(5))
+            else:
+                st.warning("No exact match found. Showing general medicines.")
+                st.dataframe(medicine.head(5))
 
-        if len(filtered) > 0:
-            st.dataframe(filtered[["name", "price(₹)", "short_composition1"]].head(5))
-        else:
-            st.write("General medicines:")
-            st.dataframe(medicine.head(5))
+        except Exception as e:
+            st.error("Error in prediction. Check your data.")
 
-        # ✅ Warning
-        st.info("⚠️ This is AI-based prediction. Please consult a doctor.")
+# ================== TAB 2 ==================
+with tab2:
+    st.subheader("Search Medicines")
 
-# ---------------- OPTION 2 ----------------
-elif option == "Medicines":
+    disease_input = st.text_input("Enter Disease")
 
-    st.header("💊 Medicine Recommendation")
-
-    disease_input = st.text_input("Enter Disease Name")
-
-    if st.button("Search Medicines"):
-
+    if st.button("Search"):
         filtered = medicine[
             medicine["name"].str.contains(disease_input, case=False, na=False)
         ]
 
         if len(filtered) > 0:
-            st.dataframe(filtered[["name", "price(₹)", "short_composition1"]].head(5))
+            st.dataframe(filtered[["name", "price(₹)", "short_composition1"]])
         else:
             st.warning("No medicines found")
 
-# ---------------- OPTION 3 ----------------
-elif option == "Hospitals":
+# ================== TAB 3 ==================
+with tab3:
+    st.subheader("Find Hospitals")
 
-    st.header("🏥 Find Hospitals")
+    city = st.text_input("Enter City Name")
 
-    city = st.text_input("Enter City")
-
-    if st.button("Search Hospitals"):
-
+    if st.button("Find"):
         filtered = hospital[
             hospital["City"].str.contains(city, case=False, na=False)
         ]
 
         if len(filtered) > 0:
-            st.dataframe(filtered[["Hospital", "City", "LocalAddress", "Pincode"]].head(5))
+            st.dataframe(filtered[["Hospital", "City", "LocalAddress", "Pincode"]])
         else:
             st.warning("No hospitals found")
+
+# ---------------- FOOTER ----------------
+st.markdown("---")
+st.caption("⚠️ This is AI-based prediction. Consult a doctor.")
 
 
